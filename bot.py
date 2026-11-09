@@ -1,9 +1,24 @@
+import os
+import threading
 import telebot
 from telebot import types
 import random
 import re
+from flask import Flask
 
-# ТВОЙ ТОКЕН
+# --- 1. ФЕЙКОВЫЙ ВЕБ-СЕРВЕР (Чтобы Render не убивал бота) ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running 24/7!"
+
+def run_flask():
+    # Render сам подставит нужный порт (обычно 10000)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
+# --- 2. ТВОЙ ТОКЕН ---
 TOKEN = '8749974375:AAF2d7iNYo22JZp1de0aMKmGkfdHDR2r0u8'
 bot = telebot.TeleBot(TOKEN)
 
@@ -33,7 +48,6 @@ def humanize(text):
         new_sentences.append(sentence)
     return ' '.join(new_sentences)
 
-# Главное меню (инлайн-кнопки)
 def get_main_menu():
     markup = types.InlineKeyboardMarkup(row_width=2)
     btn_help = types.InlineKeyboardButton("📖 Инструкция", callback_data="help")
@@ -54,11 +68,10 @@ def start(message):
 def help_command(message):
     text = (
         "📖 Как это работает:\n\n"
-        "1. Отправь текст, написанный нейросетью (ChatGPT, Claude и т.д.).\n"
-        "2. Я обработаю его и покажу первые 120 символов.\n"
-        "3. Если хочешь получить весь текст файлом — оплати 50 звезд (Telegram Stars).\n"
-        "4. После оплаты отправь текст снова, и я пришлю файл.\n\n"
-        "💡 Все оплаты проходят через официальную систему Telegram Stars!"
+        "1. Отправь текст, написанный нейросетью.\n"
+        "2. Я покажу первые 120 символов.\n"
+        "3. Оплати 50 звезд, чтобы получить полный файл.\n"
+        "4. После оплаты отправь текст снова, и я пришлю файл."
     )
     bot.send_message(message.chat.id, text)
 
@@ -75,24 +88,20 @@ def handle_text(message):
     bot.send_message(message.chat.id, "⏳ Нейросеть обрабатывает текст...")
     
     if message.chat.id in PAID_USERS:
-        # Выдаем файл
         result = humanize(message.text)
         filename = f"text_{message.chat.id}.txt"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(result)
         bot.send_document(message.chat.id, open(filename, "rb"), caption="✅ Готово! Твой уникальный текст.")
-        import os
         os.remove(filename)
     else:
-        # Выдаем превью и кнопку оплаты
         preview = humanize(message.text)[:120] + "..."
         prices = [types.LabeledPrice(label="Доступ к тексту", amount=50)]
-        
         try:
             bot.send_invoice(
                 message.chat.id,
                 title="Очеловеченный текст",
-                description=f"Начало: {preview}\n\nОплатите 50 звезд, чтобы получить полный файл.",
+                description=f"Начало: {preview}\n\nОплатите 50 звезд для получения файла.",
                 invoice_payload="text_pay",
                 provider_token="",
                 currency="XTR",
@@ -116,7 +125,12 @@ def checkout(pre_checkout_query):
 @bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
     PAID_USERS.add(message.chat.id)
-    bot.send_message(message.chat.id, "✅ Оплата звездами прошла! Теперь отправь текст снова, и я пришлю файл.")
+    bot.send_message(message.chat.id, "✅ Оплата прошла! Отправь текст снова.")
 
-print("Бот запущен...")
-bot.polling(none_stop=True)
+# --- 3. ЗАПУСК ВСЕГО ВМЕСТЕ ---
+if __name__ == '__main__':
+    # Запускаем фейковый сайт в отдельном потоке
+    threading.Thread(target=run_flask).start()
+    print("Веб-сервер запущен. Запускаю бота...")
+    # Запускаем бота
+    bot.polling(none_stop=True)
